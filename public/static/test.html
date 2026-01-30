@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tracker Test</title>
+  <style>
+    body { font-family: sans-serif; padding: 40px; min-height: 200vh; background: yellow; }
+    button { padding: 10px 20px; margin: 10px; cursor: pointer; }
+    input, select, textarea { padding: 10px; margin: 10px; display: block; }
+    form { border: 1px solid #ccc; padding: 20px; margin: 20px 0; }
+  </style>
+</head>
+<body>
+  <h1>Tracker Test Page</h1>
+  <p>Open the browser console to see tracked events. rrweb records full session replay (mouse, scroll, keyboard, forms, DOM mutations).</p>
+
+  <button id="test-btn">Click Me</button>
+
+  <form id="test-form">
+    <input type="text" name="username" placeholder="Username">
+    <input type="email" name="email" placeholder="Email">
+    <input type="password" name="password" placeholder="Password (masked by rrweb)">
+    <textarea name="comment" placeholder="Comment..."></textarea>
+    <select name="role">
+      <option value="">Select role</option>
+      <option value="admin">Admin</option>
+      <option value="user">User</option>
+    </select>
+    <button type="submit">Submit</button>
+  </form>
+
+  <p>Try interacting with the page — rrweb captures everything.</p>
+
+  <div class="rr-block" style="background: #f0f0f0; padding: 20px; margin: 20px 0;">
+    This content is blocked from session replay recording.
+  </div>
+
+  <p style="margin-top: 400px;">Scroll down to trigger scroll events (captured by rrweb).</p>
+  <p style="margin-top: 400px;">Keep scrolling...</p>
+  <p style="margin-top: 400px;">Almost there...</p>
+
+  <script src="dist/tracker.min.js"></script>
+  <script>
+    var tracker = Tracker.init({
+      apiKey: 'test-key',
+      endpoint: '/events',
+      trackSessionReplay: true,
+      trackBattery: true,
+      trackOrientation: true,
+      trackMotion: true,
+      trackTimeOnPage: true,
+      trackPermissions: true,
+      debug: true
+    });
+  </script>
+</body>
+</html>

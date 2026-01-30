@@ -42,9 +42,6 @@ lerna-debug.log*
 .env.production.local
 .env.local
 
-# FE build output
-/public/static
-
 # temp directory
 .temp
 .tmp
