@@ -305,25 +305,52 @@ export class Tracker {
   }
 
   private setupUnloadHandlers(): void {
+    const handleUnload = () => {
+      this.captureTimeOnPage();
+      // Send all queued events via beacon (works during page unload)
+      this.flushWithBeacon();
+    };
+
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') {
-        this.captureTimeOnPage();
-        this.persist();
-        this.flush(true);
+        handleUnload();
       }
     });
 
-    window.addEventListener('beforeunload', () => {
-      this.captureTimeOnPage();
-      this.persist();
-      this.flush(true);
-    });
+    window.addEventListener('beforeunload', handleUnload);
+    window.addEventListener('pagehide', handleUnload);
+  }
 
-    window.addEventListener('pagehide', () => {
-      this.captureTimeOnPage();
-      this.persist();
-      this.flush(true);
-    });
+  private flushWithBeacon(): void {
+    if (this.queue.isEmpty()) return;
+
+    const events = this.queue.getAll();
+    const payload = {
+      apiKey: this.config.apiKey,
+      sessionId: this.sessionId,
+      userId: this.userId,
+      events
+    };
+
+    const body = JSON.stringify(payload);
+
+    // Use sendBeacon - it's designed to work during page unload
+    if (typeof navigator.sendBeacon === 'function') {
+      const success = navigator.sendBeacon(
+        this.config.endpoint,
+        new Blob([body], { type: 'application/json' })
+      );
+      if (success) {
+        this.queue.flush(); // Clear queue only if beacon succeeded
+        Storage.clearEvents();
+        this.log(`Beacon sent ${events.length} events`);
+        return;
+      }
+    }
+
+    // Fallback: persist to localStorage for recovery on next page
+    Storage.saveEvents(events);
+    this.log('Beacon failed, persisted events for recovery');
   }
 
   private captureTimeOnPage(): void {
@@ -332,20 +359,14 @@ export class Tracker {
     }
   }
 
-  private persist(): void {
-    if (!this.queue.isEmpty()) {
-      Storage.saveEvents(this.queue.getAll());
-    }
-  }
-
-  private flush(isUnload = false): void {
+  private flush(): void {
     if (this.queue.isEmpty()) return;
 
     const events = this.queue.flush();
-    this.send(events, isUnload);
+    this.send(events);
   }
 
-  private send(events: TrackerEvent[], isUnload = false): void {
+  private send(events: TrackerEvent[]): void {
     const payload = {
       apiKey: this.config.apiKey,
       sessionId: this.sessionId,
@@ -356,12 +377,6 @@ export class Tracker {
     this.log(`Flushing ${events.length} events`, payload);
 
     const body = JSON.stringify(payload);
-
-    if (isUnload && typeof navigator.sendBeacon === 'function') {
-      navigator.sendBeacon(this.config.endpoint, new Blob([body], { type: 'application/json' }));
-      Storage.clearEvents();
-      return;
-    }
 
     fetch(this.config.endpoint, {
       method: 'POST',
