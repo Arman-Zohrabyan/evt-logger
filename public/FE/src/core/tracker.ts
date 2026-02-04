@@ -161,6 +161,7 @@ export class Tracker {
       this.queue.add('connection', connectionInfo);
     }
 
+    const identity = Storage.getUserIdentity();
     this.queue.add('pageview', {
       url: window.location.href,
       referrer: document.referrer,
@@ -168,7 +169,8 @@ export class Tracker {
       title: document.title,
       isNewSession: this.isNewSession,
       isNewUser: this.isNewUser,
-      pageViewNumber: Storage.getSessionData()?.pageViews || 1
+      pageViewNumber: Storage.getSessionData()?.pageViews || 1,
+      visitNumber: identity?.visitCount || 1
     });
 
     // Emit user_identified event for new users
@@ -294,6 +296,8 @@ export class Tracker {
     if (this.config.trackClicks) {
       this.clickCollector = new ClickCollector((event) => {
         this.queue.add('click', event);
+        // Flush clicks immediately to ensure they're captured
+        this.flush();
       });
       this.clickCollector.start();
     }

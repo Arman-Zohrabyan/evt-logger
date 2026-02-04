@@ -36,17 +36,44 @@ export class ClickCollector {
     const target = event.target as HTMLElement;
     if (!target) return;
 
+    // Get className safely (SVG elements have className as SVGAnimatedString)
+    let className = '';
+    if (target.className) {
+      if (typeof target.className === 'string') {
+        className = target.className;
+      } else if (target.className.baseVal !== undefined) {
+        // SVG element
+        className = target.className.baseVal;
+      }
+    }
+
+    // Find closest clickable ancestor if target is not informative
+    let clickTarget = target;
+    if (!target.id && !className && !target.tagName) {
+      const clickable = target.closest('a, button, [onclick], [role="button"]');
+      if (clickable) {
+        clickTarget = clickable as HTMLElement;
+        if (clickTarget.className) {
+          if (typeof clickTarget.className === 'string') {
+            className = clickTarget.className;
+          } else if ((clickTarget.className as any).baseVal !== undefined) {
+            className = (clickTarget.className as any).baseVal;
+          }
+        }
+      }
+    }
+
     const clickData: ClickEventData = {
-      tagName: target.tagName?.toLowerCase() || '',
-      id: target.id || '',
-      className: target.className || '',
-      name: (target as HTMLInputElement).name || '',
-      text: this.getElementText(target),
+      tagName: clickTarget.tagName?.toLowerCase() || '',
+      id: clickTarget.id || '',
+      className: className,
+      name: (clickTarget as HTMLInputElement).name || '',
+      text: this.getElementText(clickTarget),
       timestamp: Date.now()
     };
 
-    if (target.tagName?.toLowerCase() === 'a') {
-      clickData.href = (target as HTMLAnchorElement).href || '';
+    if (clickTarget.tagName?.toLowerCase() === 'a') {
+      clickData.href = (clickTarget as HTMLAnchorElement).href || '';
     }
 
     this.clicks.push(clickData);

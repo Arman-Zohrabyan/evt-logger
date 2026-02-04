@@ -132,6 +132,69 @@
     }
     .no-clicks { color: #64748b; font-style: italic; font-size: 13px; }
 
+    /* Time stats */
+    .time-stats {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+      padding: 12px 16px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 8px;
+    }
+    .time-stat {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .time-label {
+      font-size: 12px;
+      color: #94a3b8;
+      text-transform: uppercase;
+    }
+    .time-value {
+      font-size: 16px;
+      font-weight: 600;
+      color: #fff;
+      font-family: monospace;
+    }
+    .time-value.success { color: #4ade80; }
+    .time-value.warning { color: #facc15; }
+
+    /* Visibility events */
+    .visibility-events {
+      margin-top: 12px;
+      padding: 12px 16px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 8px;
+    }
+    .visibility-header {
+      font-size: 12px;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+    .visibility-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .visibility-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .visibility-icon { font-size: 14px; }
+    .visibility-icon.focus { color: #4ade80; }
+    .visibility-icon.blur { color: #f87171; }
+    .visibility-type { color: #e2e8f0; font-weight: 500; }
+    .visibility-time { color: #64748b; }
+
     /* Page replay player */
     .page-player {
       margin-bottom: 16px;
@@ -219,6 +282,7 @@
           if (evt.type === 'pageview') {
             if (p.isNewUser !== undefined && summaryData.isNewUser === null) summaryData.isNewUser = p.isNewUser;
             if (p.isNewSession !== undefined && summaryData.isNewSession === null) summaryData.isNewSession = p.isNewSession;
+            if (p.visitNumber && !summaryData.visitNumber) summaryData.visitNumber = p.visitNumber;
             summaryData.totalPageViews++;
 
             currentPage = {
@@ -228,11 +292,13 @@
               timestamp: evt.timestamp,
               clicks: [],
               otherEvents: [],
-              rrwebEvents: []
+              rrwebEvents: [],
+              timeOnPage: null,
+              visibilityEvents: []
             };
             pages.push(currentPage);
           } else if (evt.type === 'session_started') {
-            if (p.visitNumber) summaryData.visitNumber = p.visitNumber;
+            if (p.visitNumber && !summaryData.visitNumber) summaryData.visitNumber = p.visitNumber;
             if (p.startedAt) summaryData.startedAt = p.startedAt;
           } else if (evt.type === 'device') {
             if (p.userAgent) summaryData.userAgent = p.userAgent;
@@ -240,6 +306,14 @@
           } else if (evt.type === 'click') {
             if (currentPage) {
               currentPage.clicks.push(p);
+            }
+          } else if (evt.type === 'time_on_page') {
+            if (currentPage) {
+              currentPage.timeOnPage = p;
+            }
+          } else if (evt.type === 'visibility') {
+            if (currentPage) {
+              currentPage.visibilityEvents.push(p);
             }
           } else {
             if (currentPage) {
@@ -315,6 +389,27 @@
         sessionSummary.innerHTML = summaryHtml;
         sessionSummary.style.display = 'grid';
 
+        // Helper function to format milliseconds to hh:mm:ss
+        function formatDuration(ms) {
+          if (!ms || ms < 0) return '00:00:00';
+          var totalSeconds = Math.floor(ms / 1000);
+          var hours = Math.floor(totalSeconds / 3600);
+          var minutes = Math.floor((totalSeconds % 3600) / 60);
+          var seconds = totalSeconds % 60;
+          return String(hours).padStart(2, '0') + ':' +
+                 String(minutes).padStart(2, '0') + ':' +
+                 String(seconds).padStart(2, '0');
+        }
+
+        // Helper function to format date
+        function formatDate(timestamp) {
+          if (!timestamp) return '—';
+          var d = new Date(timestamp);
+          return String(d.getDate()).padStart(2, '0') + '.' +
+                 String(d.getMonth() + 1).padStart(2, '0') + '.' +
+                 d.getFullYear();
+        }
+
         // Build page-by-page sections with embedded players
         var pagesHtml = '';
 
@@ -332,7 +427,7 @@
             pagesHtml += '<span>Referrer: (direct / typed)</span>';
           }
           if (page.timestamp) {
-            pagesHtml += '<span>Time: ' + new Date(page.timestamp).toLocaleTimeString() + '</span>';
+            pagesHtml += '<span>Visit: ' + formatDate(page.timestamp) + ' ' + new Date(page.timestamp).toLocaleTimeString() + '</span>';
           }
           pagesHtml += '</div>';
           pagesHtml += '</div>';
@@ -344,6 +439,15 @@
             pagesHtml += '<div class="page-player" id="' + playerId + '"></div>';
           } else {
             pagesHtml += '<div class="no-replay">No replay recording for this page</div>';
+          }
+
+          // Time on page stats
+          if (page.timeOnPage) {
+            pagesHtml += '<div class="time-stats">';
+            pagesHtml += '<div class="time-stat"><span class="time-label">Total Time:</span> <span class="time-value">' + formatDuration(page.timeOnPage.totalTime) + '</span></div>';
+            pagesHtml += '<div class="time-stat"><span class="time-label">Active Time:</span> <span class="time-value success">' + formatDuration(page.timeOnPage.activeTime) + '</span></div>';
+            pagesHtml += '<div class="time-stat"><span class="time-label">Idle Time:</span> <span class="time-value warning">' + formatDuration(page.timeOnPage.idleTime) + '</span></div>';
+            pagesHtml += '</div>';
           }
 
           // Clicks for this page
@@ -370,6 +474,28 @@
           }
 
           pagesHtml += '</div>';
+
+          // Visibility events for this page
+          if (page.visibilityEvents && page.visibilityEvents.length > 0) {
+            pagesHtml += '<div class="visibility-events">';
+            pagesHtml += '<div class="visibility-header">Tab Activity</div>';
+            pagesHtml += '<div class="visibility-list">';
+            page.visibilityEvents.forEach(function (vis) {
+              var visTime = vis.timestamp ? new Date(vis.timestamp).toLocaleTimeString() : '';
+              var isFocus = vis.type === 'focus';
+              var icon = isFocus ? '👁' : '💤';
+              var label = isFocus ? 'Focused' : 'Left tab';
+              var iconClass = isFocus ? 'focus' : 'blur';
+              pagesHtml += '<div class="visibility-item">';
+              pagesHtml += '<span class="visibility-icon ' + iconClass + '">' + icon + '</span>';
+              pagesHtml += '<span class="visibility-type">' + label + '</span>';
+              pagesHtml += '<span class="visibility-time">' + visTime + '</span>';
+              pagesHtml += '</div>';
+            });
+            pagesHtml += '</div>';
+            pagesHtml += '</div>';
+          }
+
           pagesHtml += '</div>';
           pagesHtml += '</div>';
         });
@@ -378,7 +504,8 @@
         infoEvents.forEach(function (evt) {
           var payload = evt.payload || {};
 
-          if (evt.type === 'click' || evt.type === 'pageview') return;
+          // Skip events that are shown elsewhere
+          if (evt.type === 'click' || evt.type === 'pageview' || evt.type === 'time_on_page' || evt.type === 'visibility') return;
 
           var entries = Object.keys(payload).filter(function (k) {
             return k !== 'sessionId' && k !== 'apiKey' && k !== 'userId' && k !== 'ip';
