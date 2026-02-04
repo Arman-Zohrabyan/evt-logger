@@ -251,7 +251,11 @@ export class Tracker {
       this.sessionReplayCollector = new SessionReplayCollector(
         (event, isCheckout) => {
           const eventType = isCheckout ? 'rrweb_checkout' : 'rrweb';
-          this.queue.add(eventType, event);
+          // Include pageUrl with rrweb events for accurate page matching
+          this.queue.add(eventType, {
+            ...event,
+            pageUrl: window.location.href
+          });
         },
         {
           checkoutEveryNth: 200,

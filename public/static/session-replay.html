@@ -248,40 +248,29 @@
           }
         });
 
-        // Group rrweb events by page
-        // Each rrweb_checkout (type 2 = FullSnapshot) starts a new page recording
-        var rrwebPageGroups = [];
-        var currentRrwebGroup = [];
+        // Group rrweb events by pageUrl
+        // Each rrweb event now contains pageUrl for accurate matching
+        var rrwebByPage = {};
 
         replayEvents.forEach(function(evt) {
           var p = evt.payload || {};
+          var pageUrl = p.pageUrl || '';
           var rrwebEvt = {};
           for (var key in p) {
-            if (key === 'sessionId' || key === 'apiKey' || key === 'userId' || key === 'ip') continue;
+            if (key === 'sessionId' || key === 'apiKey' || key === 'userId' || key === 'ip' || key === 'pageUrl') continue;
             rrwebEvt[key] = p[key];
           }
 
-          // rrweb event type 2 = FullSnapshot (page start)
-          // rrweb_checkout events are full snapshots
-          if (evt.type === 'rrweb_checkout' || rrwebEvt.type === 2) {
-            if (currentRrwebGroup.length > 0) {
-              rrwebPageGroups.push(currentRrwebGroup);
-            }
-            currentRrwebGroup = [rrwebEvt];
-          } else {
-            currentRrwebGroup.push(rrwebEvt);
+          if (!rrwebByPage[pageUrl]) {
+            rrwebByPage[pageUrl] = [];
           }
+          rrwebByPage[pageUrl].push(rrwebEvt);
         });
 
-        // Don't forget the last group
-        if (currentRrwebGroup.length > 0) {
-          rrwebPageGroups.push(currentRrwebGroup);
-        }
-
-        // Match rrweb groups to pages (by order)
-        for (var i = 0; i < pages.length && i < rrwebPageGroups.length; i++) {
-          pages[i].rrwebEvents = rrwebPageGroups[i];
-        }
+        // Match rrweb events to pages by URL
+        pages.forEach(function(page) {
+          page.rrwebEvents = rrwebByPage[page.url] || [];
+        });
 
         // Build summary card
         var summaryHtml = '';
