@@ -41,9 +41,9 @@ export class ClickCollector {
     if (target.className) {
       if (typeof target.className === 'string') {
         className = target.className;
-      } else if (target.className.baseVal !== undefined) {
-        // SVG element
-        className = target.className.baseVal;
+      } else if (typeof (target.className as any).baseVal === 'string') {
+        // SVG element - className is SVGAnimatedString
+        className = (target.className as any).baseVal;
       }
     }
 
