@@ -14,6 +14,9 @@ class TrackerEventDto {
   sessionId: string;
 
   @ApiProperty()
+  userId: string;
+
+  @ApiProperty()
   data: any;
 }
 
@@ -23,6 +26,9 @@ export class BulkEventsDto {
 
   @ApiProperty()
   sessionId: string;
+
+  @ApiProperty()
+  userId: string;
 
   @ApiProperty({ type: [TrackerEventDto] })
   events: TrackerEventDto[];

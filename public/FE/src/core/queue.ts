@@ -4,10 +4,12 @@ import { getTimestamp, generateId } from '../utils/helpers';
 export class EventQueue {
   private queue: TrackerEvent[] = [];
   private sessionId: string;
+  private userId: string;
   private maxSize: number;
 
-  constructor(sessionId: string, maxSize: number = 1000) {
+  constructor(sessionId: string, userId: string, maxSize: number = 1000) {
     this.sessionId = sessionId;
+    this.userId = userId;
     this.maxSize = maxSize;
   }
 
@@ -17,6 +19,7 @@ export class EventQueue {
       type,
       timestamp: getTimestamp(),
       sessionId: this.sessionId,
+      userId: this.userId,
       data
     };
 

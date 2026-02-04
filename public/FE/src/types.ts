@@ -3,6 +3,7 @@ export interface TrackerConfig {
   endpoint?: string;
   flushInterval?: number;
   maxQueueSize?: number;
+  sessionTimeoutMinutes?: number;
   trackSessionReplay?: boolean;
   trackDevice?: boolean;
   trackLocation?: boolean;
@@ -12,6 +13,7 @@ export interface TrackerConfig {
   trackMotion?: boolean;
   trackTimeOnPage?: boolean;
   trackPermissions?: boolean;
+  trackClicks?: boolean;
   debug?: boolean;
 }
 
@@ -20,7 +22,22 @@ export interface TrackerEvent {
   type: string;
   timestamp: number;
   sessionId: string;
+  userId: string;
   data: any;
+}
+
+export interface UserIdentity {
+  userId: string;
+  createdAt: number;
+  visitCount: number;
+  lastSeenAt: number;
+}
+
+export interface SessionData {
+  sessionId: string;
+  startedAt: number;
+  lastActivityAt: number;
+  pageViews: number;
 }
 
 export interface DeviceInfo {

@@ -1,4 +1,4 @@
-import { TrackerConfig, TrackerEvent } from '../types';
+import { TrackerConfig, TrackerEvent, UserIdentity, SessionData } from '../types';
 import { EventQueue } from './queue';
 import { Storage } from './storage';
 import { generateId } from '../utils/helpers';
@@ -13,11 +13,15 @@ import { MotionCollector } from '../collectors/motion';
 import { TimeOnPageCollector } from '../collectors/timeOnPage';
 import { PermissionsCollector } from '../collectors/permissions';
 import { SessionReplayCollector } from '../collectors/sessionReplay';
+import { ClickCollector } from '../collectors/click';
 
 export class Tracker {
   private config: Required<TrackerConfig>;
   private queue: EventQueue;
   private sessionId: string;
+  private userId: string;
+  private isNewSession: boolean;
+  private isNewUser: boolean;
   private flushInterval: ReturnType<typeof setInterval> | null = null;
 
   private deviceCollector: DeviceCollector;
@@ -31,12 +35,14 @@ export class Tracker {
   private timeOnPageCollector?: TimeOnPageCollector;
   private permissionsCollector: PermissionsCollector;
   private sessionReplayCollector?: SessionReplayCollector;
+  private clickCollector?: ClickCollector;
 
   constructor(config: TrackerConfig) {
     this.config = {
       endpoint: '/events',
       flushInterval: 3000,
       maxQueueSize: 1000,
+      sessionTimeoutMinutes: 30,
       trackSessionReplay: true,
       trackDevice: true,
       trackLocation: false,
@@ -46,14 +52,22 @@ export class Tracker {
       trackMotion: false,
       trackTimeOnPage: true,
       trackPermissions: false,
+      trackClicks: true,
       debug: false,
       ...config
     };
 
-    this.sessionId = generateId();
-    Storage.setSessionId(this.sessionId);
+    // Initialize user identity (persistent across visits)
+    const userInit = this.initializeUser();
+    this.userId = userInit.userId;
+    this.isNewUser = userInit.isNewUser;
 
-    this.queue = new EventQueue(this.sessionId, this.config.maxQueueSize);
+    // Initialize session (with expiry check for cross-page tracking)
+    const sessionInit = this.initializeSession();
+    this.sessionId = sessionInit.sessionId;
+    this.isNewSession = sessionInit.isNewSession;
+
+    this.queue = new EventQueue(this.sessionId, this.userId, this.config.maxQueueSize);
 
     this.deviceCollector = new DeviceCollector();
     this.connectionCollector = new ConnectionCollector();
@@ -64,10 +78,63 @@ export class Tracker {
     this.init();
   }
 
+  private initializeUser(): { userId: string; isNewUser: boolean } {
+    let identity = Storage.getUserIdentity();
+
+    if (identity) {
+      // Returning user - update last seen
+      identity.lastSeenAt = Date.now();
+      Storage.setUserIdentity(identity);
+      this.log('Returning user detected', identity);
+      return { userId: identity.userId, isNewUser: false };
+    }
+
+    // New user - create identity
+    identity = {
+      userId: generateId(),
+      createdAt: Date.now(),
+      visitCount: 1,
+      lastSeenAt: Date.now()
+    };
+    Storage.setUserIdentity(identity);
+    this.log('New user created', identity);
+    return { userId: identity.userId, isNewUser: true };
+  }
+
+  private initializeSession(): { sessionId: string; isNewSession: boolean } {
+    const timeoutMs = this.config.sessionTimeoutMinutes * 60 * 1000;
+
+    // Check for existing valid session
+    if (!Storage.isSessionExpired(timeoutMs)) {
+      const existingSession = Storage.getSessionData()!;
+      Storage.incrementPageViews();
+      this.log('Continuing existing session', existingSession);
+      return { sessionId: existingSession.sessionId, isNewSession: false };
+    }
+
+    // Create new session
+    const sessionData: SessionData = {
+      sessionId: generateId(),
+      startedAt: Date.now(),
+      lastActivityAt: Date.now(),
+      pageViews: 1
+    };
+    Storage.setSessionData(sessionData);
+
+    // Increment user's visit count for new session (only if not first visit)
+    if (!this.isNewUser) {
+      Storage.incrementVisitCount();
+    }
+
+    this.log('New session created', sessionData);
+    return { sessionId: sessionData.sessionId, isNewSession: true };
+  }
+
   private init(): void {
     this.recoverEvents();
     this.collectInitialData();
     this.startCollectors();
+    this.setupActivityTracking();
     this.flushInterval = setInterval(() => this.flush(), this.config.flushInterval);
     this.setupUnloadHandlers();
 
@@ -97,8 +164,32 @@ export class Tracker {
     this.queue.add('pageview', {
       url: window.location.href,
       referrer: document.referrer,
-      title: document.title
+      cameFrom: document.referrer,
+      title: document.title,
+      isNewSession: this.isNewSession,
+      isNewUser: this.isNewUser,
+      pageViewNumber: Storage.getSessionData()?.pageViews || 1
     });
+
+    // Emit user_identified event for new users
+    if (this.isNewUser) {
+      this.queue.add('user_identified', {
+        userId: this.userId,
+        isFirstVisit: true,
+        identifiedAt: Date.now()
+      });
+    }
+
+    // Emit session_started event for new sessions
+    if (this.isNewSession) {
+      const identity = Storage.getUserIdentity();
+      this.queue.add('session_started', {
+        sessionId: this.sessionId,
+        userId: this.userId,
+        visitNumber: identity?.visitCount || 1,
+        startedAt: Date.now()
+      });
+    }
 
     if (this.config.trackPerformance) {
       window.addEventListener('load', () => {
@@ -195,6 +286,22 @@ export class Tracker {
       });
       this.timeOnPageCollector.start();
     }
+
+    if (this.config.trackClicks) {
+      this.clickCollector = new ClickCollector((event) => {
+        this.queue.add('click', event);
+      });
+      this.clickCollector.start();
+    }
+  }
+
+  private setupActivityTracking(): void {
+    // Update session activity on user interactions to extend session timeout
+    ['click', 'keydown', 'scroll', 'touchstart'].forEach(eventType => {
+      document.addEventListener(eventType, () => {
+        Storage.updateSessionActivity();
+      }, { passive: true, capture: true });
+    });
   }
 
   private setupUnloadHandlers(): void {
@@ -242,6 +349,7 @@ export class Tracker {
     const payload = {
       apiKey: this.config.apiKey,
       sessionId: this.sessionId,
+      userId: this.userId,
       events
     };
 
@@ -293,6 +401,7 @@ export class Tracker {
     this.batteryCollector?.stop();
     this.orientationCollector?.stop();
     this.motionCollector?.stop();
+    this.clickCollector?.stop();
 
     if (this.timeOnPageCollector) {
       this.queue.add('time_on_page', this.timeOnPageCollector.collect());

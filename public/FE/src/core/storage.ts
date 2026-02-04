@@ -1,6 +1,10 @@
+import { UserIdentity, SessionData } from '../types';
+
 const STORAGE_KEY = 'tracker_pending_events';
-const SESSION_KEY = 'tracker_session_id';
+const USER_KEY = 'tracker_user_identity';
+const SESSION_KEY = 'tracker_session_data';
 const MAX_STORAGE_BYTES = 4 * 1024 * 1024;
+const DEFAULT_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 
 export class Storage {
   static saveEvents(events: any[]): void {
@@ -49,17 +53,79 @@ export class Storage {
     } catch (e) {}
   }
 
-  static getSessionId(): string | null {
+  // ========== USER IDENTITY METHODS ==========
+
+  static getUserIdentity(): UserIdentity | null {
     try {
-      return sessionStorage.getItem(SESSION_KEY);
+      const stored = localStorage.getItem(USER_KEY);
+      if (!stored) return null;
+      return JSON.parse(stored);
     } catch (e) {
       return null;
     }
   }
 
-  static setSessionId(id: string): void {
+  static setUserIdentity(identity: UserIdentity): void {
     try {
-      sessionStorage.setItem(SESSION_KEY, id);
+      localStorage.setItem(USER_KEY, JSON.stringify(identity));
+    } catch (e) {}
+  }
+
+  static incrementVisitCount(): void {
+    const identity = this.getUserIdentity();
+    if (identity) {
+      identity.visitCount++;
+      identity.lastSeenAt = Date.now();
+      this.setUserIdentity(identity);
+    }
+  }
+
+  // ========== SESSION METHODS ==========
+
+  static getSessionData(): SessionData | null {
+    try {
+      const stored = localStorage.getItem(SESSION_KEY);
+      if (!stored) return null;
+      return JSON.parse(stored);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  static setSessionData(session: SessionData): void {
+    try {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    } catch (e) {}
+  }
+
+  static updateSessionActivity(): void {
+    const session = this.getSessionData();
+    if (session) {
+      session.lastActivityAt = Date.now();
+      this.setSessionData(session);
+    }
+  }
+
+  static incrementPageViews(): void {
+    const session = this.getSessionData();
+    if (session) {
+      session.pageViews++;
+      session.lastActivityAt = Date.now();
+      this.setSessionData(session);
+    }
+  }
+
+  static isSessionExpired(timeoutMs: number = DEFAULT_SESSION_TIMEOUT_MS): boolean {
+    const session = this.getSessionData();
+    if (!session) return true;
+
+    const elapsed = Date.now() - session.lastActivityAt;
+    return elapsed > timeoutMs;
+  }
+
+  static clearSession(): void {
+    try {
+      localStorage.removeItem(SESSION_KEY);
     } catch (e) {}
   }
 }

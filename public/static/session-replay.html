@@ -33,6 +33,60 @@
     .detail-item {}
     .detail-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
     .detail-value { font-size: 14px; color: #ddd; word-break: break-all; }
+
+    .clicks-list { list-style: none; padding: 0; margin: 0; }
+    .clicks-list li { padding: 10px 12px; border-bottom: 1px solid #2a2a5a; font-size: 13px; }
+    .clicks-list li:last-child { border-bottom: none; }
+    .click-tag { display: inline-block; background: #818cf8; color: #000; padding: 2px 6px; border-radius: 4px; font-weight: 600; margin-right: 8px; font-size: 11px; text-transform: uppercase; }
+    .click-id { color: #4ade80; }
+    .click-class { color: #facc15; }
+    .click-name { color: #f472b6; }
+    .click-text { color: #94a3b8; font-style: italic; }
+    .click-time { color: #666; font-size: 11px; float: right; }
+
+    /* Session summary card */
+    .session-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+      padding: 20px;
+      background: linear-gradient(135deg, #1a1a3e 0%, #16213e 100%);
+      border: 1px solid #2a2a5a;
+      border-radius: 12px;
+    }
+    .summary-item {
+      padding: 12px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 8px;
+    }
+    .summary-label {
+      font-size: 11px;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+    .summary-value {
+      font-size: 16px;
+      font-weight: 600;
+      color: #fff;
+      word-break: break-all;
+    }
+    .summary-value.highlight { color: #818cf8; }
+    .summary-value.success { color: #4ade80; }
+    .summary-value.warning { color: #facc15; }
+    .summary-value.muted { color: #666; font-size: 13px; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge-new { background: #4ade80; color: #000; }
+    .badge-returning { background: #818cf8; color: #000; }
   </style>
 </head>
 <body>
@@ -43,6 +97,7 @@
     <span id="session-label">...</span>
   </div>
   <div class="session-meta" id="session-meta"></div>
+  <div id="session-summary" class="session-summary" style="display:none;"></div>
   <div id="content"><div class="loading">Loading replay data...</div></div>
   <div id="session-details"></div>
 
@@ -57,6 +112,7 @@
       var sessionMeta = document.getElementById('session-meta');
       var sessionsLink = document.getElementById('sessions-link');
       var sessionDetails = document.getElementById('session-details');
+      var sessionSummary = document.getElementById('session-summary');
 
       if (website) {
         sessionsLink.href = '/sessions.html?website=' + encodeURIComponent(website);
@@ -117,11 +173,122 @@
         .then(function (events) {
           if (!events.length) return;
 
+          // Extract key info from events
+          var summaryData = {
+            userId: null,
+            ip: null,
+            isNewUser: null,
+            isNewSession: null,
+            visitNumber: null,
+            pageViewNumber: null,
+            userAgent: null,
+            platform: null,
+            url: null,
+            referrer: null,
+            startedAt: null
+          };
+
+          events.forEach(function (evt) {
+            var p = evt.payload || {};
+            if (p.userId && !summaryData.userId) summaryData.userId = p.userId;
+            if (p.ip && !summaryData.ip) summaryData.ip = p.ip;
+            if (evt.type === 'pageview') {
+              if (p.isNewUser !== undefined) summaryData.isNewUser = p.isNewUser;
+              if (p.isNewSession !== undefined) summaryData.isNewSession = p.isNewSession;
+              if (p.pageViewNumber) summaryData.pageViewNumber = p.pageViewNumber;
+              if (p.url) summaryData.url = p.url;
+              if (p.referrer) summaryData.referrer = p.referrer;
+            }
+            if (evt.type === 'session_started') {
+              if (p.visitNumber) summaryData.visitNumber = p.visitNumber;
+              if (p.startedAt) summaryData.startedAt = p.startedAt;
+            }
+            if (evt.type === 'device') {
+              if (p.userAgent) summaryData.userAgent = p.userAgent;
+              if (p.platform) summaryData.platform = p.platform;
+            }
+          });
+
+          // Build summary card
+          var summaryHtml = '';
+
+          // User ID
+          summaryHtml += '<div class="summary-item">';
+          summaryHtml += '<div class="summary-label">User ID</div>';
+          summaryHtml += '<div class="summary-value highlight">' + escapeHtml(summaryData.userId || '—') + '</div>';
+          summaryHtml += '</div>';
+
+          // User Type Badge
+          summaryHtml += '<div class="summary-item">';
+          summaryHtml += '<div class="summary-label">User Type</div>';
+          summaryHtml += '<div class="summary-value">';
+          if (summaryData.isNewUser === true) {
+            summaryHtml += '<span class="badge badge-new">New User</span>';
+          } else if (summaryData.isNewUser === false) {
+            summaryHtml += '<span class="badge badge-returning">Returning User</span>';
+          } else {
+            summaryHtml += '—';
+          }
+          summaryHtml += '</div></div>';
+
+          // Visit Number
+          summaryHtml += '<div class="summary-item">';
+          summaryHtml += '<div class="summary-label">Visit Number</div>';
+          summaryHtml += '<div class="summary-value success">' + (summaryData.visitNumber ? '#' + summaryData.visitNumber : '—') + '</div>';
+          summaryHtml += '</div>';
+
+          // IP Address
+          summaryHtml += '<div class="summary-item">';
+          summaryHtml += '<div class="summary-label">IP Address</div>';
+          summaryHtml += '<div class="summary-value warning">' + escapeHtml(summaryData.ip || '—') + '</div>';
+          summaryHtml += '</div>';
+
+          // Page Views in Session
+          summaryHtml += '<div class="summary-item">';
+          summaryHtml += '<div class="summary-label">Pages in Session</div>';
+          summaryHtml += '<div class="summary-value">' + (summaryData.pageViewNumber || '—') + '</div>';
+          summaryHtml += '</div>';
+
+          // Platform
+          summaryHtml += '<div class="summary-item">';
+          summaryHtml += '<div class="summary-label">Platform</div>';
+          summaryHtml += '<div class="summary-value">' + escapeHtml(summaryData.platform || '—') + '</div>';
+          summaryHtml += '</div>';
+
+          // Current URL
+          if (summaryData.url) {
+            summaryHtml += '<div class="summary-item" style="grid-column: span 2;">';
+            summaryHtml += '<div class="summary-label">Page URL</div>';
+            summaryHtml += '<div class="summary-value muted">' + escapeHtml(summaryData.url) + '</div>';
+            summaryHtml += '</div>';
+          }
+
+          // Referrer
+          if (summaryData.referrer) {
+            summaryHtml += '<div class="summary-item" style="grid-column: span 2;">';
+            summaryHtml += '<div class="summary-label">Referrer</div>';
+            summaryHtml += '<div class="summary-value muted">' + escapeHtml(summaryData.referrer) + '</div>';
+            summaryHtml += '</div>';
+          }
+
+          sessionSummary.innerHTML = summaryHtml;
+          sessionSummary.style.display = 'grid';
+
+          // Build detail sections
           var html = '';
+          var clickEvents = [];
+
           events.forEach(function (evt) {
             var payload = evt.payload || {};
+
+            // Collect click events separately
+            if (evt.type === 'click') {
+              clickEvents.push(payload);
+              return;
+            }
+
             var entries = Object.keys(payload).filter(function (k) {
-              return k !== 'sessionId' && k !== 'apiKey';
+              return k !== 'sessionId' && k !== 'apiKey' && k !== 'userId' && k !== 'ip';
             });
             if (!entries.length) return;
 
@@ -147,6 +314,28 @@
 
             html += '</div></div></div>';
           });
+
+          // Render clicks section
+          if (clickEvents.length) {
+            html += '<div class="detail-section">';
+            html += '<div class="detail-header">Clicks (' + clickEvents.length + ')</div>';
+            html += '<div class="detail-body"><ul class="clicks-list">';
+
+            clickEvents.forEach(function (click) {
+              var time = click.timestamp ? new Date(click.timestamp).toLocaleTimeString() : '';
+              html += '<li>';
+              html += '<span class="click-tag">' + escapeHtml(click.tagName || 'element') + '</span>';
+              if (click.id) html += '<span class="click-id">#' + escapeHtml(click.id) + '</span> ';
+              if (click.className) html += '<span class="click-class">.' + escapeHtml(click.className.split(' ').join('.')) + '</span> ';
+              if (click.name) html += '<span class="click-name">[name="' + escapeHtml(click.name) + '"]</span> ';
+              if (click.text) html += '<span class="click-text">"' + escapeHtml(click.text.substring(0, 50)) + '"</span>';
+              if (click.href) html += ' <span style="color:#60a5fa;">→ ' + escapeHtml(click.href) + '</span>';
+              if (time) html += '<span class="click-time">' + time + '</span>';
+              html += '</li>';
+            });
+
+            html += '</ul></div></div>';
+          }
 
           sessionDetails.innerHTML = html;
         })

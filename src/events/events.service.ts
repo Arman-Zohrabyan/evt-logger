@@ -17,13 +17,18 @@ export class EventsService {
     return createdEvent.save();
   }
 
-  async createBulk(bulkEventsDto: BulkEventsDto): Promise<{ inserted: number }> {
+  async createBulk(
+    bulkEventsDto: BulkEventsDto,
+    clientIp: string | null,
+  ): Promise<{ inserted: number }> {
     const docs = bulkEventsDto.events.map((evt) => ({
       type: evt.type,
       payload: {
         ...evt.data,
         sessionId: bulkEventsDto.sessionId,
+        userId: bulkEventsDto.userId,
         apiKey: bulkEventsDto.apiKey,
+        ip: clientIp,
       },
       source: bulkEventsDto.apiKey,
       timestamp: new Date(evt.timestamp),
@@ -156,6 +161,101 @@ export class EventsService {
       .find({
         'payload.sessionId': sessionId,
         type: { $in: ['rrweb', 'rrweb_checkout'] },
+      })
+      .sort({ timestamp: 1 })
+      .exec();
+  }
+
+  async getUsers(website: string) {
+    return this.eventModel.aggregate([
+      {
+        $match: {
+          type: 'pageview',
+          'payload.userId': { $exists: true },
+        },
+      },
+      {
+        $addFields: {
+          origin: {
+            $let: {
+              vars: {
+                fullUrl: { $ifNull: ['$payload.url', ''] },
+              },
+              in: {
+                $arrayElemAt: [
+                  {
+                    $split: [
+                      {
+                        $arrayElemAt: [
+                          { $split: ['$$fullUrl', '://'] },
+                          1,
+                        ],
+                      },
+                      '/',
+                    ],
+                  },
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      },
+      { $match: { origin: website } },
+      {
+        $group: {
+          _id: '$payload.userId',
+          firstSeen: { $min: '$timestamp' },
+          lastSeen: { $max: '$timestamp' },
+          sessionIds: { $addToSet: '$payload.sessionId' },
+          totalEvents: { $sum: 1 },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          userId: '$_id',
+          firstSeen: 1,
+          lastSeen: 1,
+          sessionCount: { $size: '$sessionIds' },
+          totalEvents: 1,
+        },
+      },
+      { $sort: { lastSeen: -1 } },
+    ]);
+  }
+
+  async getUserSessions(userId: string) {
+    return this.eventModel.aggregate([
+      { $match: { 'payload.userId': userId } },
+      {
+        $group: {
+          _id: '$payload.sessionId',
+          startedAt: { $min: '$timestamp' },
+          endedAt: { $max: '$timestamp' },
+          eventCount: { $sum: 1 },
+          eventTypes: { $addToSet: '$type' },
+        },
+      },
+      { $sort: { startedAt: -1 } },
+      {
+        $project: {
+          _id: 0,
+          sessionId: '$_id',
+          startedAt: 1,
+          endedAt: 1,
+          eventCount: 1,
+          eventTypes: 1,
+        },
+      },
+    ]);
+  }
+
+  async getUserJourney(userId: string) {
+    return this.eventModel
+      .find({
+        'payload.userId': userId,
+        type: 'pageview',
       })
       .sort({ timestamp: 1 })
       .exec();
