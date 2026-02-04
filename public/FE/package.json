@@ -4,8 +4,8 @@
   "type": "module",
   "main": "dist/tracker.min.js",
   "scripts": {
-    "build": "rollup -c",
-    "dev": "rollup -c -w"
+    "build": "npx rollup -c",
+    "dev": "npx rollup -c -w"
   },
   "keywords": [],
   "author": "",
