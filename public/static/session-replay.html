@@ -501,11 +501,18 @@
         });
 
         // Add other detail sections (device, session_started, etc.)
+        // Deduplicate: only show each event type once (first occurrence)
+        var seenEventTypes = {};
+
         infoEvents.forEach(function (evt) {
           var payload = evt.payload || {};
 
           // Skip events that are shown elsewhere
           if (evt.type === 'click' || evt.type === 'pageview' || evt.type === 'time_on_page' || evt.type === 'visibility') return;
+
+          // Skip duplicates - only show first occurrence of each event type
+          if (seenEventTypes[evt.type]) return;
+          seenEventTypes[evt.type] = true;
 
           var entries = Object.keys(payload).filter(function (k) {
             return k !== 'sessionId' && k !== 'apiKey' && k !== 'userId' && k !== 'ip';
