@@ -13,7 +13,6 @@
     .breadcrumb a { color: #818cf8; text-decoration: none; }
     .breadcrumb a:hover { text-decoration: underline; }
     .session-meta { margin-bottom: 24px; font-size: 13px; color: #aaa; font-family: monospace; }
-    #player-wrap { display: flex; justify-content: center; }
     .empty { padding: 40px; text-align: center; color: #999; font-size: 16px; }
     .loading { padding: 40px; text-align: center; color: #999; }
     .error { padding: 20px; background: #3a1111; border: 1px solid #6b2020; border-radius: 8px; color: #f88; }
@@ -115,6 +114,7 @@
     }
     .page-meta {
       display: flex;
+      flex-wrap: wrap;
       gap: 24px;
       margin-top: 8px;
       font-size: 12px;
@@ -131,6 +131,23 @@
       margin-bottom: 8px;
     }
     .no-clicks { color: #64748b; font-style: italic; font-size: 13px; }
+
+    /* Page replay player */
+    .page-player {
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: center;
+      background: #0a0a0a;
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .no-replay {
+      color: #64748b;
+      font-style: italic;
+      font-size: 13px;
+      text-align: center;
+      padding: 20px;
+    }
   </style>
 </head>
 <body>
@@ -142,7 +159,6 @@
   </div>
   <div class="session-meta" id="session-meta"></div>
   <div id="session-summary" class="session-summary" style="display:none;"></div>
-  <div id="content"><div class="loading">Loading replay data...</div></div>
   <div id="session-details"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/rrweb-player@latest/dist/index.js"></script>
@@ -151,7 +167,6 @@
       var params = new URLSearchParams(window.location.search);
       var sessionId = params.get('sessionId');
       var website = params.get('website');
-      var content = document.getElementById('content');
       var sessionLabel = document.getElementById('session-label');
       var sessionMeta = document.getElementById('session-meta');
       var sessionsLink = document.getElementById('sessions-link');
@@ -163,7 +178,7 @@
       }
 
       if (!sessionId) {
-        content.innerHTML = '<div class="error">Missing ?sessionId= parameter.</div>';
+        sessionDetails.innerHTML = '<div class="error">Missing ?sessionId= parameter.</div>';
         return;
       }
 
@@ -171,245 +186,268 @@
       sessionMeta.textContent = 'Session: ' + sessionId;
       document.title = 'Replay — ' + sessionId;
 
-      fetch('/events/session-replay/' + encodeURIComponent(sessionId))
-        .then(function (res) {
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          return res.json();
-        })
-        .then(function (events) {
-          if (!events.length) {
-            content.innerHTML = '<div class="empty">No replay events found for this session.</div>';
-            return;
-          }
+      // Fetch both session info and replay data
+      Promise.all([
+        fetch('/events/session-info/' + encodeURIComponent(sessionId)).then(function(r) { return r.json(); }),
+        fetch('/events/session-replay/' + encodeURIComponent(sessionId)).then(function(r) { return r.json(); })
+      ]).then(function(results) {
+        var infoEvents = results[0] || [];
+        var replayEvents = results[1] || [];
 
-          var rrwebEvents = events.map(function (evt) {
-            var p = evt.payload;
-            var rrwebEvt = {};
-            for (var key in p) {
-              if (key === 'sessionId' || key === 'apiKey') continue;
-              rrwebEvt[key] = p[key];
+        // Extract summary data
+        var summaryData = {
+          userId: null,
+          ip: null,
+          isNewUser: null,
+          isNewSession: null,
+          visitNumber: null,
+          totalPageViews: 0,
+          userAgent: null,
+          platform: null,
+          startedAt: null
+        };
+
+        // Group info events by page (using pageview events as page boundaries)
+        var pages = [];
+        var currentPage = null;
+
+        infoEvents.forEach(function (evt) {
+          var p = evt.payload || {};
+          if (p.userId && !summaryData.userId) summaryData.userId = p.userId;
+          if (p.ip && !summaryData.ip) summaryData.ip = p.ip;
+
+          if (evt.type === 'pageview') {
+            if (p.isNewUser !== undefined && summaryData.isNewUser === null) summaryData.isNewUser = p.isNewUser;
+            if (p.isNewSession !== undefined && summaryData.isNewSession === null) summaryData.isNewSession = p.isNewSession;
+            summaryData.totalPageViews++;
+
+            currentPage = {
+              url: p.url || '',
+              referrer: p.referrer || '',
+              pageViewNumber: p.pageViewNumber || summaryData.totalPageViews,
+              timestamp: evt.timestamp,
+              clicks: [],
+              otherEvents: [],
+              rrwebEvents: []
+            };
+            pages.push(currentPage);
+          } else if (evt.type === 'session_started') {
+            if (p.visitNumber) summaryData.visitNumber = p.visitNumber;
+            if (p.startedAt) summaryData.startedAt = p.startedAt;
+          } else if (evt.type === 'device') {
+            if (p.userAgent) summaryData.userAgent = p.userAgent;
+            if (p.platform) summaryData.platform = p.platform;
+          } else if (evt.type === 'click') {
+            if (currentPage) {
+              currentPage.clicks.push(p);
             }
-            return rrwebEvt;
-          });
-
-          content.innerHTML = '<div id="player-wrap"></div>';
-
-          new rrwebPlayer({
-            target: document.getElementById('player-wrap'),
-            props: {
-              events: rrwebEvents,
-              showController: true,
-              autoPlay: false,
-              skipInactive: true,
-              speedOption: [1, 2, 4, 8],
-            },
-          });
-        })
-        .catch(function (err) {
-          content.innerHTML = '<div class="error">Failed to load replay: ' + escapeHtml(err.message) + '</div>';
+          } else {
+            if (currentPage) {
+              currentPage.otherEvents.push(evt);
+            }
+          }
         });
 
-      fetch('/events/session-info/' + encodeURIComponent(sessionId))
-        .then(function (res) {
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          return res.json();
-        })
-        .then(function (events) {
-          if (!events.length) return;
+        // Group rrweb events by page
+        // Each rrweb_checkout (type 2 = FullSnapshot) starts a new page recording
+        var rrwebPageGroups = [];
+        var currentRrwebGroup = [];
 
-          // Extract key info from events
-          var summaryData = {
-            userId: null,
-            ip: null,
-            isNewUser: null,
-            isNewSession: null,
-            visitNumber: null,
-            totalPageViews: 0,
-            userAgent: null,
-            platform: null,
-            startedAt: null
-          };
-
-          // Group events by page (using pageview events as page boundaries)
-          var pages = [];
-          var currentPage = null;
-
-          events.forEach(function (evt) {
-            var p = evt.payload || {};
-            if (p.userId && !summaryData.userId) summaryData.userId = p.userId;
-            if (p.ip && !summaryData.ip) summaryData.ip = p.ip;
-
-            if (evt.type === 'pageview') {
-              if (p.isNewUser !== undefined && summaryData.isNewUser === null) summaryData.isNewUser = p.isNewUser;
-              if (p.isNewSession !== undefined && summaryData.isNewSession === null) summaryData.isNewSession = p.isNewSession;
-              summaryData.totalPageViews++;
-
-              // Start a new page
-              currentPage = {
-                url: p.url || '',
-                referrer: p.referrer || '',
-                pageViewNumber: p.pageViewNumber || summaryData.totalPageViews,
-                timestamp: evt.timestamp,
-                clicks: [],
-                otherEvents: []
-              };
-              pages.push(currentPage);
-            } else if (evt.type === 'session_started') {
-              if (p.visitNumber) summaryData.visitNumber = p.visitNumber;
-              if (p.startedAt) summaryData.startedAt = p.startedAt;
-            } else if (evt.type === 'device') {
-              if (p.userAgent) summaryData.userAgent = p.userAgent;
-              if (p.platform) summaryData.platform = p.platform;
-            } else if (evt.type === 'click') {
-              if (currentPage) {
-                currentPage.clicks.push(p);
-              }
-            } else {
-              if (currentPage) {
-                currentPage.otherEvents.push(evt);
-              }
-            }
-          });
-
-          // Build summary card (session-level overview)
-          var summaryHtml = '';
-
-          // User ID
-          summaryHtml += '<div class="summary-item">';
-          summaryHtml += '<div class="summary-label">User ID</div>';
-          summaryHtml += '<div class="summary-value highlight">' + escapeHtml(summaryData.userId || '—') + '</div>';
-          summaryHtml += '</div>';
-
-          // User Type Badge
-          summaryHtml += '<div class="summary-item">';
-          summaryHtml += '<div class="summary-label">User Type</div>';
-          summaryHtml += '<div class="summary-value">';
-          if (summaryData.isNewUser === true) {
-            summaryHtml += '<span class="badge badge-new">New User</span>';
-          } else if (summaryData.isNewUser === false) {
-            summaryHtml += '<span class="badge badge-returning">Returning User</span>';
-          } else {
-            summaryHtml += '—';
+        replayEvents.forEach(function(evt) {
+          var p = evt.payload || {};
+          var rrwebEvt = {};
+          for (var key in p) {
+            if (key === 'sessionId' || key === 'apiKey' || key === 'userId' || key === 'ip') continue;
+            rrwebEvt[key] = p[key];
           }
-          summaryHtml += '</div></div>';
 
-          // Visit Number
-          summaryHtml += '<div class="summary-item">';
-          summaryHtml += '<div class="summary-label">Visit Number</div>';
-          summaryHtml += '<div class="summary-value success">' + (summaryData.visitNumber ? '#' + summaryData.visitNumber : '—') + '</div>';
-          summaryHtml += '</div>';
+          // rrweb event type 2 = FullSnapshot (page start)
+          // rrweb_checkout events are full snapshots
+          if (evt.type === 'rrweb_checkout' || rrwebEvt.type === 2) {
+            if (currentRrwebGroup.length > 0) {
+              rrwebPageGroups.push(currentRrwebGroup);
+            }
+            currentRrwebGroup = [rrwebEvt];
+          } else {
+            currentRrwebGroup.push(rrwebEvt);
+          }
+        });
 
-          // IP Address
-          summaryHtml += '<div class="summary-item">';
-          summaryHtml += '<div class="summary-label">IP Address</div>';
-          summaryHtml += '<div class="summary-value warning">' + escapeHtml(summaryData.ip || '—') + '</div>';
-          summaryHtml += '</div>';
+        // Don't forget the last group
+        if (currentRrwebGroup.length > 0) {
+          rrwebPageGroups.push(currentRrwebGroup);
+        }
 
-          // Total Pages in Session
-          summaryHtml += '<div class="summary-item">';
-          summaryHtml += '<div class="summary-label">Total Pages Visited</div>';
-          summaryHtml += '<div class="summary-value">' + summaryData.totalPageViews + '</div>';
-          summaryHtml += '</div>';
+        // Match rrweb groups to pages (by order)
+        for (var i = 0; i < pages.length && i < rrwebPageGroups.length; i++) {
+          pages[i].rrwebEvents = rrwebPageGroups[i];
+        }
 
-          // Platform
-          summaryHtml += '<div class="summary-item">';
-          summaryHtml += '<div class="summary-label">Platform</div>';
-          summaryHtml += '<div class="summary-value">' + escapeHtml(summaryData.platform || '—') + '</div>';
-          summaryHtml += '</div>';
+        // Build summary card
+        var summaryHtml = '';
 
-          sessionSummary.innerHTML = summaryHtml;
-          sessionSummary.style.display = 'grid';
+        summaryHtml += '<div class="summary-item">';
+        summaryHtml += '<div class="summary-label">User ID</div>';
+        summaryHtml += '<div class="summary-value highlight">' + escapeHtml(summaryData.userId || '—') + '</div>';
+        summaryHtml += '</div>';
 
-          // Build page-by-page sections
-          var pagesHtml = '';
+        summaryHtml += '<div class="summary-item">';
+        summaryHtml += '<div class="summary-label">User Type</div>';
+        summaryHtml += '<div class="summary-value">';
+        if (summaryData.isNewUser === true) {
+          summaryHtml += '<span class="badge badge-new">New User</span>';
+        } else if (summaryData.isNewUser === false) {
+          summaryHtml += '<span class="badge badge-returning">Returning User</span>';
+        } else {
+          summaryHtml += '—';
+        }
+        summaryHtml += '</div></div>';
 
-          pages.forEach(function (page, index) {
-            pagesHtml += '<div class="page-section">';
-            pagesHtml += '<div class="page-header">';
-            pagesHtml += '<div class="page-number">Page ' + (index + 1) + ' of ' + pages.length + '</div>';
-            pagesHtml += '<div class="page-url">' + escapeHtml(page.url || '(unknown)') + '</div>';
-            pagesHtml += '<div class="page-meta">';
-            if (page.referrer) {
-              pagesHtml += '<span>Referrer: ' + escapeHtml(page.referrer) + '</span>';
+        summaryHtml += '<div class="summary-item">';
+        summaryHtml += '<div class="summary-label">Visit Number</div>';
+        summaryHtml += '<div class="summary-value success">' + (summaryData.visitNumber ? '#' + summaryData.visitNumber : '—') + '</div>';
+        summaryHtml += '</div>';
+
+        summaryHtml += '<div class="summary-item">';
+        summaryHtml += '<div class="summary-label">IP Address</div>';
+        summaryHtml += '<div class="summary-value warning">' + escapeHtml(summaryData.ip || '—') + '</div>';
+        summaryHtml += '</div>';
+
+        summaryHtml += '<div class="summary-item">';
+        summaryHtml += '<div class="summary-label">Total Pages Visited</div>';
+        summaryHtml += '<div class="summary-value">' + summaryData.totalPageViews + '</div>';
+        summaryHtml += '</div>';
+
+        summaryHtml += '<div class="summary-item">';
+        summaryHtml += '<div class="summary-label">Platform</div>';
+        summaryHtml += '<div class="summary-value">' + escapeHtml(summaryData.platform || '—') + '</div>';
+        summaryHtml += '</div>';
+
+        sessionSummary.innerHTML = summaryHtml;
+        sessionSummary.style.display = 'grid';
+
+        // Build page-by-page sections with embedded players
+        var pagesHtml = '';
+
+        pages.forEach(function (page, index) {
+          var playerId = 'player-' + index;
+
+          pagesHtml += '<div class="page-section">';
+          pagesHtml += '<div class="page-header">';
+          pagesHtml += '<div class="page-number">Page ' + (index + 1) + ' of ' + pages.length + '</div>';
+          pagesHtml += '<div class="page-url">' + escapeHtml(page.url || '(unknown)') + '</div>';
+          pagesHtml += '<div class="page-meta">';
+          if (page.referrer) {
+            pagesHtml += '<span>Referrer: ' + escapeHtml(page.referrer) + '</span>';
+          } else {
+            pagesHtml += '<span>Referrer: (direct / typed)</span>';
+          }
+          if (page.timestamp) {
+            pagesHtml += '<span>Time: ' + new Date(page.timestamp).toLocaleTimeString() + '</span>';
+          }
+          pagesHtml += '</div>';
+          pagesHtml += '</div>';
+
+          pagesHtml += '<div class="page-body">';
+
+          // Player container for this page
+          if (page.rrwebEvents && page.rrwebEvents.length > 0) {
+            pagesHtml += '<div class="page-player" id="' + playerId + '"></div>';
+          } else {
+            pagesHtml += '<div class="no-replay">No replay recording for this page</div>';
+          }
+
+          // Clicks for this page
+          pagesHtml += '<div class="page-clicks">';
+          pagesHtml += '<div class="page-clicks-header">Clicks (' + page.clicks.length + ')</div>';
+
+          if (page.clicks.length > 0) {
+            pagesHtml += '<ul class="clicks-list">';
+            page.clicks.forEach(function (click) {
+              var time = click.timestamp ? new Date(click.timestamp).toLocaleTimeString() : '';
+              pagesHtml += '<li>';
+              pagesHtml += '<span class="click-tag">' + escapeHtml(click.tagName || 'element') + '</span>';
+              if (click.id) pagesHtml += '<span class="click-id">#' + escapeHtml(click.id) + '</span> ';
+              if (click.className) pagesHtml += '<span class="click-class">.' + escapeHtml(String(click.className).split(' ').join('.')) + '</span> ';
+              if (click.name) pagesHtml += '<span class="click-name">[name="' + escapeHtml(click.name) + '"]</span> ';
+              if (click.text) pagesHtml += '<span class="click-text">"' + escapeHtml(click.text.substring(0, 50)) + '"</span>';
+              if (click.href) pagesHtml += ' <span style="color:#60a5fa;">→ ' + escapeHtml(click.href) + '</span>';
+              if (time) pagesHtml += '<span class="click-time">' + time + '</span>';
+              pagesHtml += '</li>';
+            });
+            pagesHtml += '</ul>';
+          } else {
+            pagesHtml += '<div class="no-clicks">No clicks recorded on this page</div>';
+          }
+
+          pagesHtml += '</div>';
+          pagesHtml += '</div>';
+          pagesHtml += '</div>';
+        });
+
+        // Add other detail sections (device, session_started, etc.)
+        infoEvents.forEach(function (evt) {
+          var payload = evt.payload || {};
+
+          if (evt.type === 'click' || evt.type === 'pageview') return;
+
+          var entries = Object.keys(payload).filter(function (k) {
+            return k !== 'sessionId' && k !== 'apiKey' && k !== 'userId' && k !== 'ip';
+          });
+          if (!entries.length) return;
+
+          pagesHtml += '<div class="detail-section">';
+          pagesHtml += '<div class="detail-header">' + escapeHtml(evt.type) + '</div>';
+          pagesHtml += '<div class="detail-body"><div class="detail-grid">';
+
+          entries.forEach(function (key) {
+            var val = payload[key];
+            var display;
+            if (val === null || val === undefined) {
+              display = '—';
+            } else if (typeof val === 'object') {
+              display = JSON.stringify(val);
             } else {
-              pagesHtml += '<span>Referrer: (direct / typed)</span>';
+              display = String(val);
             }
-            if (page.timestamp) {
-              pagesHtml += '<span>Time: ' + new Date(page.timestamp).toLocaleTimeString() + '</span>';
-            }
-            pagesHtml += '</div>';
-            pagesHtml += '</div>';
-
-            pagesHtml += '<div class="page-body">';
-
-            // Clicks for this page
-            pagesHtml += '<div class="page-clicks">';
-            pagesHtml += '<div class="page-clicks-header">Clicks (' + page.clicks.length + ')</div>';
-
-            if (page.clicks.length > 0) {
-              pagesHtml += '<ul class="clicks-list">';
-              page.clicks.forEach(function (click) {
-                var time = click.timestamp ? new Date(click.timestamp).toLocaleTimeString() : '';
-                pagesHtml += '<li>';
-                pagesHtml += '<span class="click-tag">' + escapeHtml(click.tagName || 'element') + '</span>';
-                if (click.id) pagesHtml += '<span class="click-id">#' + escapeHtml(click.id) + '</span> ';
-                if (click.className) pagesHtml += '<span class="click-class">.' + escapeHtml(String(click.className).split(' ').join('.')) + '</span> ';
-                if (click.name) pagesHtml += '<span class="click-name">[name="' + escapeHtml(click.name) + '"]</span> ';
-                if (click.text) pagesHtml += '<span class="click-text">"' + escapeHtml(click.text.substring(0, 50)) + '"</span>';
-                if (click.href) pagesHtml += ' <span style="color:#60a5fa;">→ ' + escapeHtml(click.href) + '</span>';
-                if (time) pagesHtml += '<span class="click-time">' + time + '</span>';
-                pagesHtml += '</li>';
-              });
-              pagesHtml += '</ul>';
-            } else {
-              pagesHtml += '<div class="no-clicks">No clicks recorded on this page</div>';
-            }
-
-            pagesHtml += '</div>';
-            pagesHtml += '</div>';
-            pagesHtml += '</div>';
+            pagesHtml += '<div class="detail-item">'
+              + '<div class="detail-label">' + escapeHtml(key) + '</div>'
+              + '<div class="detail-value">' + escapeHtml(display) + '</div>'
+              + '</div>';
           });
 
-          // Build other detail sections (device, session_started, etc.)
-          var html = pagesHtml;
+          pagesHtml += '</div></div></div>';
+        });
 
-          events.forEach(function (evt) {
-            var payload = evt.payload || {};
+        sessionDetails.innerHTML = pagesHtml;
 
-            // Skip pageview and click events (already rendered in page sections)
-            if (evt.type === 'click' || evt.type === 'pageview') return;
-
-            var entries = Object.keys(payload).filter(function (k) {
-              return k !== 'sessionId' && k !== 'apiKey' && k !== 'userId' && k !== 'ip';
-            });
-            if (!entries.length) return;
-
-            html += '<div class="detail-section">';
-            html += '<div class="detail-header">' + escapeHtml(evt.type) + '</div>';
-            html += '<div class="detail-body"><div class="detail-grid">';
-
-            entries.forEach(function (key) {
-              var val = payload[key];
-              var display;
-              if (val === null || val === undefined) {
-                display = '—';
-              } else if (typeof val === 'object') {
-                display = JSON.stringify(val);
-              } else {
-                display = String(val);
+        // Initialize rrweb players for each page
+        pages.forEach(function (page, index) {
+          if (page.rrwebEvents && page.rrwebEvents.length > 0) {
+            var playerId = 'player-' + index;
+            var container = document.getElementById(playerId);
+            if (container) {
+              try {
+                new rrwebPlayer({
+                  target: container,
+                  props: {
+                    events: page.rrwebEvents,
+                    showController: true,
+                    autoPlay: false,
+                    skipInactive: true,
+                    speedOption: [1, 2, 4, 8],
+                  },
+                });
+              } catch (e) {
+                container.innerHTML = '<div class="no-replay">Failed to load replay: ' + escapeHtml(e.message) + '</div>';
               }
-              html += '<div class="detail-item">'
-                + '<div class="detail-label">' + escapeHtml(key) + '</div>'
-                + '<div class="detail-value">' + escapeHtml(display) + '</div>'
-                + '</div>';
-            });
+            }
+          }
+        });
 
-            html += '</div></div></div>';
-          });
-
-          sessionDetails.innerHTML = html;
-        })
-        .catch(function () {});
+      }).catch(function(err) {
+        sessionDetails.innerHTML = '<div class="error">Failed to load session data: ' + escapeHtml(err.message) + '</div>';
+      });
 
       function escapeHtml(str) {
         var div = document.createElement('div');
