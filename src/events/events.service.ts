@@ -1,15 +1,26 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  Inject,
+  forwardRef,
+  Logger,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Event, EventDocument } from './schemas/event.schema';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { BulkEventsDto } from './dto/bulk-events.dto';
+import { VideoGenerationService } from '../video-generation/video-generation.service';
 
 @Injectable()
 export class EventsService {
+  private readonly logger = new Logger(EventsService.name);
+
   constructor(
     @InjectModel(Event.name) private eventModel: Model<EventDocument>,
+    @Inject(forwardRef(() => VideoGenerationService))
+    private videoGenerationService: VideoGenerationService,
   ) {}
 
   async create(createEventDto: CreateEventDto): Promise<Event> {
@@ -35,6 +46,20 @@ export class EventsService {
     }));
 
     const result = await this.eventModel.insertMany(docs);
+
+    // Check for session_end events and trigger video generation
+    for (const evt of bulkEventsDto.events) {
+      if (evt.type === 'session_end' && evt.data?.endedSessionId) {
+        this.videoGenerationService
+          .enqueueJob(evt.data.endedSessionId)
+          .catch((err) =>
+            this.logger.error(
+              `Failed to enqueue video generation: ${err.message}`,
+            ),
+          );
+      }
+    }
+
     return { inserted: result.length };
   }
 

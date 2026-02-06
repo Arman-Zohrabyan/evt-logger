@@ -36,6 +36,7 @@ export class Tracker {
   private permissionsCollector: PermissionsCollector;
   private sessionReplayCollector?: SessionReplayCollector;
   private clickCollector?: ClickCollector;
+  private previousSession: SessionData | null = null;
 
   constructor(config: TrackerConfig) {
     this.config = {
@@ -112,6 +113,9 @@ export class Tracker {
       return { sessionId: existingSession.sessionId, isNewSession: false };
     }
 
+    // Save reference to expired session so we can send session_end after queue is ready
+    this.previousSession = Storage.getSessionData();
+
     // Create new session
     const sessionData: SessionData = {
       sessionId: generateId(),
@@ -151,6 +155,17 @@ export class Tracker {
   }
 
   private collectInitialData(): void {
+    // Send session_end for the previous session if it expired
+    if (this.previousSession) {
+      this.queue.add('session_end', {
+        endedSessionId: this.previousSession.sessionId,
+        endedAt: this.previousSession.lastActivityAt,
+        startedAt: this.previousSession.startedAt,
+        pageViews: this.previousSession.pageViews,
+      });
+      this.previousSession = null;
+    }
+
     if (this.config.trackDevice) {
       const deviceInfo = this.deviceCollector.collect();
       this.queue.add('device', deviceInfo);
